@@ -1,0 +1,18 @@
+DEF decoding provenance
+=======================
+
+The DEF container parsing, compression modes 0-3, special old-format case,
+and special palette semantics in src/DefDecoder.cpp are adapted from VCMI:
+
+  client/render/CDefFile.cpp
+  client/render/CDefFile.h
+  client/render/IImageLoader.h
+  clientsdl2/render/SDLImageLoader.cpp
+  mapeditor/Animation.cpp
+
+VCMI identifies these files as GNU GPL version 2.0 or later. The complete
+license text is in GPL-2.0-or-later.txt. This project is therefore distributed
+under GPL-2.0-or-later. The COM implementation, safe bounded reader, scaling,
+registration, DefDump tool, and tests were newly written for this project.
+
+VCMI project: https://github.com/vcmi/vcmi

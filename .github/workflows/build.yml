@@ -1,0 +1,60 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x86
+            cmake_arch: Win32
+            run_tests: true
+          - name: x64
+            cmake_arch: x64
+            run_tests: true
+          - name: arm64
+            cmake_arch: ARM64
+            run_tests: false
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -A ${{ matrix.cmake_arch }}
+
+      - name: Build Release
+        run: cmake --build build --config Release --parallel
+
+      - name: Run decoder tests
+        if: matrix.run_tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Prepare artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item build/Release/DefThumbnailProvider.dll package/
+          Copy-Item build/Release/DefDump.exe package/
+          Copy-Item build/Release/ComSmoke.exe package/
+          Copy-Item build/Release/ShellSmoke.exe package/
+          Copy-Item README.md package/
+          Copy-Item -Recurse LICENSES package/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DefThumbnailProvider-${{ matrix.name }}
+          path: package
+          if-no-files-found: error
+
