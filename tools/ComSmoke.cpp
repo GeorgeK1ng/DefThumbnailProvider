@@ -54,6 +54,42 @@ int wmain(int argc, wchar_t ** argv)
 		provider->Release();
 	if (init)
 		init->Release();
+
+	IPersistFile * persistFile = nullptr;
+	IExtractImage * extractImage = nullptr;
+	if (SUCCEEDED(hr))
+		hr = factory->CreateInstance(nullptr, IID_PPV_ARGS(&persistFile));
+	if (SUCCEEDED(hr))
+		hr = persistFile->QueryInterface(IID_PPV_ARGS(&extractImage));
+	if (SUCCEEDED(hr))
+		hr = persistFile->Load(argv[2], STGM_READ);
+	wchar_t cachePath[MAX_PATH]{};
+	SIZE requestedSize{ 256, 256 };
+	DWORD flags = 0;
+	if (SUCCEEDED(hr))
+		hr = extractImage->GetLocation(cachePath, MAX_PATH, nullptr, &requestedSize, 32, &flags);
+	bitmap = nullptr;
+	if (SUCCEEDED(hr))
+		hr = extractImage->Extract(&bitmap);
+	if (SUCCEEDED(hr) && bitmap)
+	{
+		BITMAP info{};
+		GetObjectW(bitmap, sizeof(info), &info);
+		std::wcout << L"XP thumbnail: " << info.bmWidth << L"x" << info.bmHeight << L"\n";
+		const auto * pixels = static_cast<const BYTE *>(info.bmBits);
+		const COLORREF expectedBackground = GetSysColor(COLOR_WINDOW);
+		if (!pixels || pixels[0] != GetBValue(expectedBackground) || pixels[1] != GetGValue(expectedBackground) || pixels[2] != GetRValue(expectedBackground) ||
+			pixels[3] != 255)
+		{
+			std::wcerr << L"XP thumbnail background was not composited\n";
+			hr = E_FAIL;
+		}
+		DeleteObject(bitmap);
+	}
+	if (extractImage)
+		extractImage->Release();
+	if (persistFile)
+		persistFile->Release();
 	if (factory)
 		factory->Release();
 	FreeLibrary(dll);

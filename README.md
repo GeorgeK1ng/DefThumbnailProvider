@@ -108,12 +108,42 @@ cmake -S . -B build-arm64 -A ARM64
 
 The main output is `build\Release\DefThumbnailProvider.dll`.
 
+## Windows XP
+
+The DLL is built against the Windows XP Win32 API baseline and does not import
+the post-XP `RegGetValueW` or `RegDeleteTreeW` functions. Registry access uses
+`RegQueryValueExW`, `RegEnumKeyExW`, and `RegDeleteKeyW` instead.
+
+Windows Vista and later use `IThumbnailProvider` with `IInitializeWithStream`.
+Windows XP Explorer uses the older `IExtractImage` interface with
+`IPersistFile`; the provider implements both paths using the same decoder and
+renderer. Registration installs both Shell handler keys without changing the
+normal `.def` file association.
+
+Modern Explorer receives premultiplied ARGB with real transparency. Windows XP
+Explorer does not reliably honor the bitmap alpha channel, so its legacy path
+composites transparent pixels onto the current `COLOR_WINDOW` system color.
+
+Use the x86 package on 32-bit Windows XP. Register it from an Administrator
+Command Prompt:
+
+```bat
+regsvr32 /n /i:machine DefThumbnailProvider.dll
+```
+
+Restart Explorer after registration. Existing `Thumbs.db` files may contain
+cached generic icons; remove the relevant `Thumbs.db` while Explorer is closed
+if thumbnails do not refresh. Windows XP support is intended for Service Pack
+3. The current automated builds and tests do not run inside Windows XP itself.
+
 ## Implementation
 
 The provider implements:
 
 - `IInitializeWithStream`
 - `IThumbnailProvider`
+- `IPersistFile`
+- `IExtractImage`
 - `IClassFactory`
 - `DllGetClassObject` and `DllCanUnloadNow`
 - per-user registration through `DllRegisterServer`

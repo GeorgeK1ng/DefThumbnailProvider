@@ -10,6 +10,7 @@
 namespace
 {
 constexpr wchar_t THUMBNAIL_HANDLER_GUID[] = L"{e357fccd-a995-4576-b01f-234630154e96}";
+constexpr wchar_t EXTRACT_IMAGE_HANDLER_GUID[] = L"{BB2E617C-0920-11D1-9A0B-00C04FC2D6C1}";
 constexpr wchar_t PROVIDER_DESCRIPTION[] = L"Heroes III DEF Thumbnail Provider";
 constexpr wchar_t CLASSES_ROOT_PATH[] = L"Software\\Classes\\CLSID\\";
 constexpr wchar_t APPROVED_EXTENSIONS_PATH[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved";
@@ -22,6 +23,11 @@ std::wstring extensionHandlerPath()
 std::wstring systemHandlerPath()
 {
 	return L"Software\\Classes\\SystemFileAssociations\\.def\\shellex\\" + std::wstring(THUMBNAIL_HANDLER_GUID);
+}
+
+std::wstring legacyHandlerPath()
+{
+	return L"Software\\Classes\\.def\\shellex\\" + std::wstring(EXTRACT_IMAGE_HANDLER_GUID);
 }
 
 LONG setStringValue(HKEY root, const std::wstring & path, const wchar_t * name, const std::wstring & value)
@@ -155,10 +161,14 @@ registerAtRoot(HKEY root)
 
 	const std::wstring extensionHandler = extensionHandlerPath();
 	const std::wstring systemHandler = systemHandlerPath();
+	const std::wstring legacyHandler = legacyHandlerPath();
 	LONG error = ensureHandlerAvailable(root, extensionHandler);
 	if (error != ERROR_SUCCESS)
 		return resultFromWin32(error);
 	error = ensureHandlerAvailable(root, systemHandler);
+	if (error != ERROR_SUCCESS)
+		return resultFromWin32(error);
+	error = ensureHandlerAvailable(root, legacyHandler);
 	if (error != ERROR_SUCCESS)
 		return resultFromWin32(error);
 
@@ -176,6 +186,9 @@ registerAtRoot(HKEY root)
 	if (error != ERROR_SUCCESS)
 		return resultFromWin32(error);
 	error = setStringValue(root, systemHandler, nullptr, kClsidString);
+	if (error != ERROR_SUCCESS)
+		return resultFromWin32(error);
+	error = setStringValue(root, legacyHandler, nullptr, kClsidString);
 	if (error != ERROR_SUCCESS)
 		return resultFromWin32(error);
 	error = setStringValue(root, APPROVED_EXTENSIONS_PATH, kClsidString, PROVIDER_DESCRIPTION);
@@ -196,6 +209,7 @@ unregisterAtRoot(HKEY root)
 
 	const LONG extensionError = deleteHandlerIfOwned(root, extensionHandlerPath());
 	const LONG systemError = deleteHandlerIfOwned(root, systemHandlerPath());
+	const LONG legacyError = deleteHandlerIfOwned(root, legacyHandlerPath());
 
 	HKEY approvedExtensions = nullptr;
 	if (RegOpenKeyExW(root, APPROVED_EXTENSIONS_PATH, 0, KEY_SET_VALUE, &approvedExtensions) == ERROR_SUCCESS)
@@ -211,6 +225,8 @@ unregisterAtRoot(HKEY root)
 		return resultFromWin32(extensionError);
 	if (systemError != ERROR_SUCCESS)
 		return resultFromWin32(systemError);
+	if (legacyError != ERROR_SUCCESS)
+		return resultFromWin32(legacyError);
 	return S_OK;
 }
 }

@@ -6,6 +6,7 @@
 #include "ImageScaler.h"
 
 #include <algorithm>
+#include <cstring>
 #include <new>
 #include <vector>
 
@@ -45,11 +46,82 @@ readAll(IStream * stream, std::vector<uint8_t> & bytes)
 	}
 	return S_OK;
 }
+
+HRESULT
+readAll(const std::wstring & filePath, std::vector<uint8_t> & bytes)
+{
+	HANDLE file = CreateFileW(filePath.c_str(),
+							  GENERIC_READ,
+							  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+							  nullptr,
+							  OPEN_EXISTING,
+							  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
+							  nullptr);
+	if (file == INVALID_HANDLE_VALUE)
+		return HRESULT_FROM_WIN32(GetLastError());
+
+	LARGE_INTEGER fileSize{};
+	if (!GetFileSizeEx(file, &fileSize))
+	{
+		const DWORD error = GetLastError();
+		CloseHandle(file);
+		return HRESULT_FROM_WIN32(error);
+	}
+	if (fileSize.QuadPart < 0 || static_cast<ULONGLONG>(fileSize.QuadPart) > MAX_FILE_SIZE)
+	{
+		CloseHandle(file);
+		return HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE);
+	}
+
+	bytes.resize(static_cast<size_t>(fileSize.QuadPart));
+	size_t totalBytesRead = 0;
+	while (totalBytesRead < bytes.size())
+	{
+		const DWORD requested = static_cast<DWORD>(std::min(bytes.size() - totalBytesRead, READ_CHUNK_SIZE));
+		DWORD bytesRead = 0;
+		if (!ReadFile(file, bytes.data() + totalBytesRead, requested, &bytesRead, nullptr))
+		{
+			const DWORD error = GetLastError();
+			CloseHandle(file);
+			return HRESULT_FROM_WIN32(error);
+		}
+		if (bytesRead == 0)
+		{
+			CloseHandle(file);
+			return HRESULT_FROM_WIN32(ERROR_HANDLE_EOF);
+		}
+		totalBytesRead += bytesRead;
+	}
+
+	CloseHandle(file);
+	return S_OK;
+}
+
+HRESULT
+createThumbnail(const std::vector<uint8_t> & bytes, UINT requestedSize, HBITMAP * bitmap, const COLORREF * backgroundColor = nullptr)
+{
+	defthumb::DecodeResult decoded;
+	std::string error;
+	if (!defthumb::DefDecoder::DecodeFirstUseful(bytes, decoded, error))
+	{
+		DEFTHUMB_LOG(L"Decode failed");
+		return HRESULT_FROM_WIN32(ERROR_BAD_FORMAT);
+	}
+
+	HBITMAP result = backgroundColor ? defthumb::CreateThumbnailBitmap(decoded.image, requestedSize, *backgroundColor)
+									 : defthumb::CreateThumbnailBitmap(decoded.image, requestedSize);
+	if (!result)
+		return E_OUTOFMEMORY;
+
+	*bitmap = result;
+	return S_OK;
+}
 }
 
 ThumbnailProvider::ThumbnailProvider() noexcept
   : referenceCount_(1)
   , stream_(nullptr)
+  , legacyRequestedSize_(0)
 {
 	InterlockedIncrement(&g_objectCount);
 }
@@ -71,6 +143,10 @@ ThumbnailProvider::QueryInterface(REFIID interfaceId, void ** object) noexcept
 		*object = static_cast<IInitializeWithStream *>(this);
 	else if (IsEqualIID(interfaceId, IID_IThumbnailProvider))
 		*object = static_cast<IThumbnailProvider *>(this);
+	else if (IsEqualIID(interfaceId, IID_IPersist) || IsEqualIID(interfaceId, IID_IPersistFile))
+		*object = static_cast<IPersistFile *>(this);
+	else if (IsEqualIID(interfaceId, IID_IExtractImage))
+		*object = static_cast<IExtractImage *>(this);
 	else
 		return E_NOINTERFACE;
 
@@ -98,7 +174,7 @@ ThumbnailProvider::Initialize(IStream * stream, DWORD) noexcept
 {
 	if (!stream)
 		return E_INVALIDARG;
-	if (stream_)
+	if (stream_ || !filePath_.empty())
 		return HRESULT_FROM_WIN32(ERROR_ALREADY_INITIALIZED);
 
 	stream->AddRef();
@@ -124,21 +200,125 @@ ThumbnailProvider::GetThumbnail(UINT requestedSize, HBITMAP * bitmap, WTS_ALPHAT
 		if (FAILED(readResult))
 			return readResult;
 
-		defthumb::DecodeResult decoded;
-		std::string error;
-		if (!defthumb::DefDecoder::DecodeFirstUseful(bytes, decoded, error))
-		{
-			DEFTHUMB_LOG(L"Decode failed");
-			return HRESULT_FROM_WIN32(ERROR_BAD_FORMAT);
-		}
-
-		HBITMAP result = defthumb::CreateThumbnailBitmap(decoded.image, requestedSize);
-		if (!result)
-			return E_OUTOFMEMORY;
-
-		*bitmap = result;
+		const HRESULT result = createThumbnail(bytes, requestedSize, bitmap);
+		if (FAILED(result))
+			return result;
 		*alphaType = WTSAT_ARGB;
 		return S_OK;
+	}
+	catch (const std::bad_alloc &)
+	{
+		return E_OUTOFMEMORY;
+	}
+	catch (...)
+	{
+		return E_FAIL;
+	}
+}
+
+HRESULT
+ThumbnailProvider::GetClassID(CLSID * classId) noexcept
+{
+	if (!classId)
+		return E_POINTER;
+	*classId = CLSID_DefThumbnailProvider;
+	return S_OK;
+}
+
+HRESULT
+ThumbnailProvider::IsDirty() noexcept
+{
+	return S_FALSE;
+}
+
+HRESULT
+ThumbnailProvider::Load(LPCOLESTR fileName, DWORD) noexcept
+{
+	if (!fileName)
+		return E_INVALIDARG;
+	if (stream_ || !filePath_.empty())
+		return HRESULT_FROM_WIN32(ERROR_ALREADY_INITIALIZED);
+
+	try
+	{
+		filePath_ = fileName;
+		return filePath_.empty() ? E_INVALIDARG : S_OK;
+	}
+	catch (const std::bad_alloc &)
+	{
+		return E_OUTOFMEMORY;
+	}
+	catch (...)
+	{
+		return E_FAIL;
+	}
+}
+
+HRESULT
+ThumbnailProvider::Save(LPCOLESTR, BOOL) noexcept
+{
+	return E_NOTIMPL;
+}
+
+HRESULT
+ThumbnailProvider::SaveCompleted(LPCOLESTR) noexcept
+{
+	return E_NOTIMPL;
+}
+
+HRESULT
+ThumbnailProvider::GetCurFile(LPOLESTR * fileName) noexcept
+{
+	if (!fileName)
+		return E_POINTER;
+	*fileName = nullptr;
+	if (filePath_.empty())
+		return S_FALSE;
+
+	const size_t byteCount = (filePath_.size() + 1) * sizeof(wchar_t);
+	auto * result = static_cast<wchar_t *>(CoTaskMemAlloc(byteCount));
+	if (!result)
+		return E_OUTOFMEMORY;
+	std::memcpy(result, filePath_.c_str(), byteCount);
+	*fileName = result;
+	return S_OK;
+}
+
+HRESULT
+ThumbnailProvider::GetLocation(LPWSTR pathBuffer, DWORD pathBufferLength, DWORD * priority, const SIZE * requestedSize, DWORD, DWORD * flags) noexcept
+{
+	if (!pathBuffer || pathBufferLength == 0 || !requestedSize || !flags)
+		return E_INVALIDARG;
+	if (filePath_.empty())
+		return E_UNEXPECTED;
+	if (filePath_.size() >= pathBufferLength)
+		return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+
+	std::memcpy(pathBuffer, filePath_.c_str(), (filePath_.size() + 1) * sizeof(wchar_t));
+	if (priority)
+		*priority = 0;
+	*flags |= IEIFLAG_CACHE;
+	legacyRequestedSize_ = static_cast<UINT>(std::max<LONG>(1, std::max(requestedSize->cx, requestedSize->cy)));
+	return S_OK;
+}
+
+HRESULT
+ThumbnailProvider::Extract(HBITMAP * bitmap) noexcept
+{
+	if (!bitmap)
+		return E_POINTER;
+	*bitmap = nullptr;
+	if (filePath_.empty() || legacyRequestedSize_ == 0)
+		return E_UNEXPECTED;
+
+	try
+	{
+		std::vector<uint8_t> bytes;
+		const HRESULT readResult = readAll(filePath_, bytes);
+		if (FAILED(readResult))
+			return readResult;
+		const COLORREF backgroundColor = GetSysColor(COLOR_WINDOW);
+		return createThumbnail(bytes, legacyRequestedSize_, bitmap, &backgroundColor);
 	}
 	catch (const std::bad_alloc &)
 	{

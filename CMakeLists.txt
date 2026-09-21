@@ -12,11 +12,23 @@ add_library(DefThumbnailProvider SHARED
   src/ImageScaler.cpp src/ImageScaler.h src/Registration.cpp src/Registration.h
   src/ThumbnailProvider.cpp src/ThumbnailProvider.h src/dllmain.cpp src/DefThumbnailProvider.exports.def)
 target_compile_features(DefThumbnailProvider PRIVATE cxx_std_17)
-target_compile_definitions(DefThumbnailProvider PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_definitions(DefThumbnailProvider PRIVATE
+  UNICODE
+  _UNICODE
+  WIN32_LEAN_AND_MEAN
+  NOMINMAX
+  WINVER=0x0501
+  _WIN32_WINNT=0x0501
+  NTDDI_VERSION=0x05010300)
 if(DEFTHUMB_ENABLE_DEBUG_LOG)
   target_compile_definitions(DefThumbnailProvider PRIVATE DEFTHUMB_ENABLE_DEBUG_LOG=1)
 endif()
 target_link_libraries(DefThumbnailProvider PRIVATE defdecoder shlwapi ole32 shell32)
+if(MSVC AND CMAKE_GENERATOR_PLATFORM STREQUAL "Win32")
+  target_link_options(DefThumbnailProvider PRIVATE "/SUBSYSTEM:WINDOWS,5.01")
+elseif(MSVC AND CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
+  target_link_options(DefThumbnailProvider PRIVATE "/SUBSYSTEM:WINDOWS,5.02")
+endif()
 add_executable(DefDump tools/DefDump.cpp)
 target_compile_features(DefDump PRIVATE cxx_std_17)
 target_compile_definitions(DefDump PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
