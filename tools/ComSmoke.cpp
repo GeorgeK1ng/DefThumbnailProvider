@@ -8,7 +8,7 @@ int wmain(int argc, wchar_t ** argv)
 {
 	if (argc != 3)
 	{
-		std::wcerr << L"Usage: ComSmoke.exe provider.dll input.def\n";
+		std::wcerr << L"Usage: ComSmoke.exe provider.dll input.def|input.d32|input.p32\n";
 		return 2;
 	}
 	HMODULE dll = LoadLibraryW(argv[1]);
@@ -77,11 +77,18 @@ int wmain(int argc, wchar_t ** argv)
 		GetObjectW(bitmap, sizeof(info), &info);
 		std::wcout << L"XP thumbnail: " << info.bmWidth << L"x" << info.bmHeight << L"\n";
 		const auto * pixels = static_cast<const BYTE *>(info.bmBits);
-		const COLORREF expectedBackground = GetSysColor(COLOR_WINDOW);
-		if (!pixels || pixels[0] != GetBValue(expectedBackground) || pixels[1] != GetGValue(expectedBackground) || pixels[2] != GetRValue(expectedBackground) ||
-			pixels[3] != 255)
+		bool hasTransparentPixel = !pixels;
+		for (LONG pixel = 0; pixels && pixel < info.bmWidth * info.bmHeight; ++pixel)
 		{
-			std::wcerr << L"XP thumbnail background was not composited\n";
+			if (pixels[size_t(pixel) * 4 + 3] != 255)
+			{
+				hasTransparentPixel = true;
+				break;
+			}
+		}
+		if (hasTransparentPixel)
+		{
+			std::wcerr << L"XP thumbnail contains uncomposited alpha\n";
 			hr = E_FAIL;
 		}
 		DeleteObject(bitmap);

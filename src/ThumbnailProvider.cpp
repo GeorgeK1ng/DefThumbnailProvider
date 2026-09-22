@@ -1,9 +1,11 @@
 #include "ThumbnailProvider.h"
 
 #include "ComHelpers.h"
+#include "D32Decoder.h"
 #include "DefDecoder.h"
 #include "DllGlobals.h"
 #include "ImageScaler.h"
+#include "P32Decoder.h"
 
 #include <algorithm>
 #include <cstring>
@@ -14,6 +16,7 @@ namespace
 {
 constexpr ULONGLONG MAX_FILE_SIZE = 256ull * 1024ull * 1024ull;
 constexpr size_t READ_CHUNK_SIZE = 1024 * 1024;
+constexpr wchar_t LEGACY_CACHE_KEY_SUFFIX[] = L"|DefThumb-20260922";
 
 HRESULT
 readAll(IStream * stream, std::vector<uint8_t> & bytes)
@@ -102,7 +105,14 @@ createThumbnail(const std::vector<uint8_t> & bytes, UINT requestedSize, HBITMAP 
 {
 	defthumb::DecodeResult decoded;
 	std::string error;
-	if (!defthumb::DefDecoder::DecodeFirstUseful(bytes, decoded, error))
+	bool decodedSuccessfully = false;
+	if (defthumb::D32Decoder::IsD32(bytes))
+		decodedSuccessfully = defthumb::D32Decoder::DecodeFirstUseful(bytes, decoded, error);
+	else if (defthumb::P32Decoder::IsP32(bytes))
+		decodedSuccessfully = defthumb::P32Decoder::Decode(bytes, decoded, error);
+	else
+		decodedSuccessfully = defthumb::DefDecoder::DecodeFirstUseful(bytes, decoded, error);
+	if (!decodedSuccessfully)
 	{
 		DEFTHUMB_LOG(L"Decode failed");
 		return HRESULT_FROM_WIN32(ERROR_BAD_FORMAT);
@@ -291,10 +301,13 @@ ThumbnailProvider::GetLocation(LPWSTR pathBuffer, DWORD pathBufferLength, DWORD 
 		return E_INVALIDARG;
 	if (filePath_.empty())
 		return E_UNEXPECTED;
-	if (filePath_.size() >= pathBufferLength)
+	constexpr size_t suffixLength = (sizeof(LEGACY_CACHE_KEY_SUFFIX) / sizeof(LEGACY_CACHE_KEY_SUFFIX[0])) - 1;
+	const size_t requiredLength = filePath_.size() + suffixLength + 1;
+	if (requiredLength > pathBufferLength)
 		return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
 
-	std::memcpy(pathBuffer, filePath_.c_str(), (filePath_.size() + 1) * sizeof(wchar_t));
+	std::memcpy(pathBuffer, filePath_.data(), filePath_.size() * sizeof(wchar_t));
+	std::memcpy(pathBuffer + filePath_.size(), LEGACY_CACHE_KEY_SUFFIX, (suffixLength + 1) * sizeof(wchar_t));
 	if (priority)
 		*priority = 0;
 	*flags |= IEIFLAG_CACHE;

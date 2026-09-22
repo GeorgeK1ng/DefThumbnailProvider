@@ -2,6 +2,7 @@
 
 #include "DllGlobals.h"
 
+#include <array>
 #include <shlobj.h>
 #include <string>
 #include <utility>
@@ -11,23 +12,24 @@ namespace
 {
 constexpr wchar_t THUMBNAIL_HANDLER_GUID[] = L"{e357fccd-a995-4576-b01f-234630154e96}";
 constexpr wchar_t EXTRACT_IMAGE_HANDLER_GUID[] = L"{BB2E617C-0920-11D1-9A0B-00C04FC2D6C1}";
-constexpr wchar_t PROVIDER_DESCRIPTION[] = L"Heroes III DEF Thumbnail Provider";
+constexpr wchar_t PROVIDER_DESCRIPTION[] = L"Heroes III DEF, D32 and P32 Thumbnail Provider";
 constexpr wchar_t CLASSES_ROOT_PATH[] = L"Software\\Classes\\CLSID\\";
 constexpr wchar_t APPROVED_EXTENSIONS_PATH[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved";
+constexpr std::array<const wchar_t *, 3> SUPPORTED_EXTENSIONS = { L".def", L".d32", L".p32" };
 
-std::wstring extensionHandlerPath()
+std::wstring extensionHandlerPath(const wchar_t * extension)
 {
-	return L"Software\\Classes\\.def\\shellex\\" + std::wstring(THUMBNAIL_HANDLER_GUID);
+	return L"Software\\Classes\\" + std::wstring(extension) + L"\\shellex\\" + THUMBNAIL_HANDLER_GUID;
 }
 
-std::wstring systemHandlerPath()
+std::wstring systemHandlerPath(const wchar_t * extension)
 {
-	return L"Software\\Classes\\SystemFileAssociations\\.def\\shellex\\" + std::wstring(THUMBNAIL_HANDLER_GUID);
+	return L"Software\\Classes\\SystemFileAssociations\\" + std::wstring(extension) + L"\\shellex\\" + THUMBNAIL_HANDLER_GUID;
 }
 
-std::wstring legacyHandlerPath()
+std::wstring legacyHandlerPath(const wchar_t * extension)
 {
-	return L"Software\\Classes\\.def\\shellex\\" + std::wstring(EXTRACT_IMAGE_HANDLER_GUID);
+	return L"Software\\Classes\\" + std::wstring(extension) + L"\\shellex\\" + EXTRACT_IMAGE_HANDLER_GUID;
 }
 
 LONG setStringValue(HKEY root, const std::wstring & path, const wchar_t * name, const std::wstring & value)
@@ -159,18 +161,19 @@ registerAtRoot(HKEY root)
 		return HRESULT_FROM_WIN32(error ? error : ERROR_INSUFFICIENT_BUFFER);
 	}
 
-	const std::wstring extensionHandler = extensionHandlerPath();
-	const std::wstring systemHandler = systemHandlerPath();
-	const std::wstring legacyHandler = legacyHandlerPath();
-	LONG error = ensureHandlerAvailable(root, extensionHandler);
-	if (error != ERROR_SUCCESS)
-		return resultFromWin32(error);
-	error = ensureHandlerAvailable(root, systemHandler);
-	if (error != ERROR_SUCCESS)
-		return resultFromWin32(error);
-	error = ensureHandlerAvailable(root, legacyHandler);
-	if (error != ERROR_SUCCESS)
-		return resultFromWin32(error);
+	LONG error = ERROR_SUCCESS;
+	for (const wchar_t * extension : SUPPORTED_EXTENSIONS)
+	{
+		error = ensureHandlerAvailable(root, extensionHandlerPath(extension));
+		if (error != ERROR_SUCCESS)
+			return resultFromWin32(error);
+		error = ensureHandlerAvailable(root, systemHandlerPath(extension));
+		if (error != ERROR_SUCCESS)
+			return resultFromWin32(error);
+		error = ensureHandlerAvailable(root, legacyHandlerPath(extension));
+		if (error != ERROR_SUCCESS)
+			return resultFromWin32(error);
+	}
 
 	const std::wstring classPath = CLASSES_ROOT_PATH + std::wstring(kClsidString);
 	error = setStringValue(root, classPath, nullptr, PROVIDER_DESCRIPTION);
@@ -182,15 +185,18 @@ registerAtRoot(HKEY root)
 	error = setStringValue(root, classPath + L"\\InprocServer32", L"ThreadingModel", L"Apartment");
 	if (error != ERROR_SUCCESS)
 		return resultFromWin32(error);
-	error = setStringValue(root, extensionHandler, nullptr, kClsidString);
-	if (error != ERROR_SUCCESS)
-		return resultFromWin32(error);
-	error = setStringValue(root, systemHandler, nullptr, kClsidString);
-	if (error != ERROR_SUCCESS)
-		return resultFromWin32(error);
-	error = setStringValue(root, legacyHandler, nullptr, kClsidString);
-	if (error != ERROR_SUCCESS)
-		return resultFromWin32(error);
+	for (const wchar_t * extension : SUPPORTED_EXTENSIONS)
+	{
+		error = setStringValue(root, extensionHandlerPath(extension), nullptr, kClsidString);
+		if (error != ERROR_SUCCESS)
+			return resultFromWin32(error);
+		error = setStringValue(root, systemHandlerPath(extension), nullptr, kClsidString);
+		if (error != ERROR_SUCCESS)
+			return resultFromWin32(error);
+		error = setStringValue(root, legacyHandlerPath(extension), nullptr, kClsidString);
+		if (error != ERROR_SUCCESS)
+			return resultFromWin32(error);
+	}
 	error = setStringValue(root, APPROVED_EXTENSIONS_PATH, kClsidString, PROVIDER_DESCRIPTION);
 	if (error != ERROR_SUCCESS)
 		return resultFromWin32(error);
@@ -207,9 +213,21 @@ unregisterAtRoot(HKEY root)
 	if (classError == ERROR_FILE_NOT_FOUND)
 		classError = ERROR_SUCCESS;
 
-	const LONG extensionError = deleteHandlerIfOwned(root, extensionHandlerPath());
-	const LONG systemError = deleteHandlerIfOwned(root, systemHandlerPath());
-	const LONG legacyError = deleteHandlerIfOwned(root, legacyHandlerPath());
+	LONG handlerError = ERROR_SUCCESS;
+	for (const wchar_t * extension : SUPPORTED_EXTENSIONS)
+	{
+		const std::array<std::wstring, 3> handlerPaths = {
+			extensionHandlerPath(extension),
+			systemHandlerPath(extension),
+			legacyHandlerPath(extension),
+		};
+		for (const std::wstring & handlerPath : handlerPaths)
+		{
+			const LONG error = deleteHandlerIfOwned(root, handlerPath);
+			if (handlerError == ERROR_SUCCESS && error != ERROR_SUCCESS)
+				handlerError = error;
+		}
+	}
 
 	HKEY approvedExtensions = nullptr;
 	if (RegOpenKeyExW(root, APPROVED_EXTENSIONS_PATH, 0, KEY_SET_VALUE, &approvedExtensions) == ERROR_SUCCESS)
@@ -221,12 +239,8 @@ unregisterAtRoot(HKEY root)
 	SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
 	if (classError != ERROR_SUCCESS)
 		return resultFromWin32(classError);
-	if (extensionError != ERROR_SUCCESS)
-		return resultFromWin32(extensionError);
-	if (systemError != ERROR_SUCCESS)
-		return resultFromWin32(systemError);
-	if (legacyError != ERROR_SUCCESS)
-		return resultFromWin32(legacyError);
+	if (handlerError != ERROR_SUCCESS)
+		return resultFromWin32(handlerError);
 	return S_OK;
 }
 }

@@ -5,7 +5,7 @@ int wmain(int argc, wchar_t ** argv)
 {
 	if (argc != 2)
 	{
-		std::wcerr << L"Usage: ShellSmoke.exe input.def\n";
+		std::wcerr << L"Usage: ShellSmoke.exe input.def|input.d32|input.p32\n";
 		return 2;
 	}
 	DWORD attrs = GetFileAttributesW(argv[1]);

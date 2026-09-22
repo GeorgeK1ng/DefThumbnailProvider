@@ -1,4 +1,6 @@
+#include "D32Decoder.h"
 #include "DefDecoder.h"
+#include "P32Decoder.h"
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -43,6 +45,91 @@ std::vector<uint8_t> makeUncompressedDef()
 	data.insert(data.end(), { 10, 20, 30, 40 });
 	return data;
 }
+
+std::vector<uint8_t> makeD32()
+{
+	std::vector<uint8_t> data;
+	appendU32(data, 0x46323344);
+	appendU32(data, 1);
+	appendU32(data, 24);
+	appendU32(data, 2);
+	appendU32(data, 2);
+	appendU32(data, 1);
+	appendU32(data, 8);
+	appendU32(data, 1);
+	appendU32(data, 33);
+	appendU32(data, 7);
+	appendU32(data, 1);
+	appendU32(data, 0);
+	for (int index = 0; index < 13; ++index)
+		data.push_back(index == 0 ? 'D' : 0);
+	appendU32(data, 65);
+	appendU32(data, 32);
+	appendU32(data, 16);
+	appendU32(data, 2);
+	appendU32(data, 2);
+	appendU32(data, 2);
+	appendU32(data, 2);
+	appendU32(data, 0);
+	appendU32(data, 0);
+	appendU32(data, 8);
+	appendU32(data, 0);
+	data.insert(data.end(),
+				{
+				  255,
+				  0,
+				  0,
+				  255,
+				  0,
+				  255,
+				  255,
+				  255,
+				  0,
+				  0,
+				  255,
+				  255,
+				  0,
+				  255,
+				  0,
+				  255,
+				});
+	return data;
+}
+
+std::vector<uint8_t> makeP32()
+{
+	std::vector<uint8_t> data;
+	appendU32(data, 0x46323350);
+	appendU32(data, 0);
+	appendU32(data, 32);
+	appendU32(data, 56);
+	appendU32(data, 40);
+	appendU32(data, 16);
+	appendU32(data, 2);
+	appendU32(data, 2);
+	appendU32(data, 8);
+	appendU32(data, 0);
+	data.insert(data.end(),
+				{
+				  255,
+				  0,
+				  0,
+				  255,
+				  0,
+				  255,
+				  255,
+				  255,
+				  0,
+				  0,
+				  255,
+				  255,
+				  0,
+				  255,
+				  0,
+				  255,
+				});
+	return data;
+}
 }
 int main()
 {
@@ -65,6 +152,34 @@ int main()
 	{
 		std::cerr << "empty input accepted\n";
 		return 3;
+	}
+
+	auto d32 = makeD32();
+	if (!defthumb::D32Decoder::IsD32(d32) || !defthumb::D32Decoder::DecodeFirstUseful(d32, out, err) || out.frame.group != 7 || out.image.width != 2 ||
+		out.image.height != 2 || out.image.bgra[0] != 0 || out.image.bgra[1] != 0 || out.image.bgra[2] != 255 || out.image.bgra[3] != 255)
+	{
+		std::cerr << "valid D32 decode failed: " << err << "\n";
+		return 4;
+	}
+	d32.resize(80);
+	if (defthumb::D32Decoder::DecodeFirstUseful(d32, out, err))
+	{
+		std::cerr << "truncated D32 input accepted\n";
+		return 5;
+	}
+
+	auto p32 = makeP32();
+	if (!defthumb::P32Decoder::IsP32(p32) || !defthumb::P32Decoder::Decode(p32, out, err) || out.image.width != 2 || out.image.height != 2 ||
+		out.image.bgra[0] != 0 || out.image.bgra[1] != 0 || out.image.bgra[2] != 255 || out.image.bgra[3] != 255)
+	{
+		std::cerr << "valid P32 decode failed: " << err << "\n";
+		return 6;
+	}
+	p32.resize(48);
+	if (defthumb::P32Decoder::Decode(p32, out, err))
+	{
+		std::cerr << "truncated P32 input accepted\n";
+		return 7;
 	}
 	return 0;
 }

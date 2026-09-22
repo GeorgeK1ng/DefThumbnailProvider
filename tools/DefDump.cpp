@@ -1,4 +1,6 @@
+#include "D32Decoder.h"
 #include "DefDecoder.h"
+#include "P32Decoder.h"
 #include <windows.h>
 #include <fstream>
 #include <iostream>
@@ -50,7 +52,7 @@ int wmain(int argc, wchar_t ** argv)
 {
 	if (argc != 3)
 	{
-		std::wcerr << L"Usage: DefDump.exe input.def output.bmp\n";
+		std::wcerr << L"Usage: DefDump.exe input.def|input.d32|input.p32 output.bmp\n";
 		return 2;
 	}
 	std::vector<uint8_t> bytes;
@@ -61,7 +63,14 @@ int wmain(int argc, wchar_t ** argv)
 	}
 	defthumb::DecodeResult result;
 	std::string error;
-	if (!defthumb::DefDecoder::DecodeFirstUseful(bytes, result, error))
+	bool decodedSuccessfully = false;
+	if (defthumb::D32Decoder::IsD32(bytes))
+		decodedSuccessfully = defthumb::D32Decoder::DecodeFirstUseful(bytes, result, error);
+	else if (defthumb::P32Decoder::IsP32(bytes))
+		decodedSuccessfully = defthumb::P32Decoder::Decode(bytes, result, error);
+	else
+		decodedSuccessfully = defthumb::DefDecoder::DecodeFirstUseful(bytes, result, error);
+	if (!decodedSuccessfully)
 	{
 		std::cerr << "Decode failed: " << error << "\n";
 		return 4;

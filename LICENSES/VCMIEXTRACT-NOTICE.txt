@@ -1,0 +1,13 @@
+vcmiextract notice
+==================
+
+The D32 container/frame layout and P32 image layout used by this project were
+learned from the extract_def_d32f and load_image_pcx implementations in
+vcmiextract.
+
+vcmiextract is distributed under the GNU General Public License, version 2.
+The D32 and P32 decoders in this repository are standalone rewrites with
+explicit bounds checking and no dependency on vcmiextract at runtime.
+
+The full GPL version 2 text is available in GPL-2.0-or-later.txt. This project
+is distributed under terms compatible with GNU GPL version 2.

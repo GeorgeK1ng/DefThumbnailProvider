@@ -1,16 +1,24 @@
 cmake_minimum_required(VERSION 3.15)
-project(DefThumbnailProvider VERSION 1.0.0 LANGUAGES CXX)
+project(DefThumbnailProvider VERSION 1.1.0 LANGUAGES CXX RC)
 if(NOT WIN32)
   message(FATAL_ERROR "Windows-only project")
 endif()
 option(DEFTHUMB_ENABLE_DEBUG_LOG "Enable OutputDebugString diagnostics" OFF)
-add_library(defdecoder STATIC src/DefDecoder.cpp src/DefDecoder.h)
+configure_file(src/Version.rc.in "${CMAKE_CURRENT_BINARY_DIR}/Version.rc" @ONLY)
+add_library(defdecoder STATIC
+  src/D32Decoder.cpp
+  src/D32Decoder.h
+  src/DefDecoder.cpp
+  src/DefDecoder.h
+  src/P32Decoder.cpp
+  src/P32Decoder.h)
 target_compile_features(defdecoder PUBLIC cxx_std_17)
 target_include_directories(defdecoder PUBLIC src)
 add_library(DefThumbnailProvider SHARED
   src/ClassFactory.cpp src/ClassFactory.h src/ComHelpers.h src/DllGlobals.cpp src/DllGlobals.h
   src/ImageScaler.cpp src/ImageScaler.h src/Registration.cpp src/Registration.h
   src/ThumbnailProvider.cpp src/ThumbnailProvider.h src/dllmain.cpp src/DefThumbnailProvider.exports.def)
+target_sources(DefThumbnailProvider PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/Version.rc")
 target_compile_features(DefThumbnailProvider PRIVATE cxx_std_17)
 target_compile_definitions(DefThumbnailProvider PRIVATE
   UNICODE

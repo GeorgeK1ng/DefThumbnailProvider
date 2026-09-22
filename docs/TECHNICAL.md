@@ -1,14 +1,15 @@
-# Technical documentation
+# DEF, D32 & P32 Thumbnail Provider technical documentation
 
 [Back to the main page](../README.md)
 
-DEF Thumbnail Provider is a native Windows Shell extension that shows image
-thumbnails for Heroes of Might and Magic III `.def` files in File Explorer.
+The provider is a native Windows Shell extension that shows image thumbnails
+for Heroes of Might and Magic III `.def` and HotA `.d32`/`.p32` files in File
+Explorer.
 
 The project contains no .NET code and has no runtime dependency on VCMI, SDL,
 or Qt. It supports the standard Heroes III DEF compression formats 0, 1, 2,
-and 3. DEF data is read from the `IStream` supplied by Windows Explorer and is
-validated before decoding.
+and 3 as well as HotA D32 and P32 files. Input is read from the `IStream`
+supplied by Windows Explorer and is validated before decoding.
 
 ## Origin and license
 
@@ -17,8 +18,18 @@ The DEF decoding rules are adapted from the
 palette handling. The standalone decoder in this repository was rewritten to
 remove VCMI engine dependencies and add strict bounds checking.
 
-VCMI is licensed under GPL-2.0-or-later. Because this project contains adapted
-VCMI decoding code, this project is also distributed under GPL-2.0-or-later.
+The D32 container layout was learned from the `extract_def_d32f` routine in
+`vcmiextract`. Its small standalone decoder validates all headers, dimensions,
+offsets, margins, frame counts, and buffer sizes before copying bottom-up BGRA
+frame data to the shared top-down BGRA image representation. See
+[VCMIEXTRACT-NOTICE.txt](../LICENSES/VCMIEXTRACT-NOTICE.txt).
+
+The P32 layout was learned from the `load_image_pcx` routine in `vcmiextract`.
+P32 files contain a 40-byte header followed by uncompressed, bottom-up BGRA
+pixels. The standalone decoder validates dimensions and all declared sizes.
+
+VCMI is licensed under GPL-2.0-or-later and vcmiextract under GPL version 2.
+This project is distributed under GNU GPL version 2 compatible terms.
 See [VCMI-NOTICE.txt](../LICENSES/VCMI-NOTICE.txt) and
 [GPL-2.0-or-later.txt](../LICENSES/GPL-2.0-or-later.txt).
 
@@ -47,8 +58,8 @@ ie4uinit.exe -ClearIconCache
 ie4uinit.exe -show
 ```
 
-Restart **Windows Explorer** from Task Manager. Open a folder containing DEF
-files and select **Large icons** or **Extra large icons**.
+Restart **Windows Explorer** from Task Manager. Open a folder containing DEF,
+D32, or P32 files and select **Large icons** or **Extra large icons**.
 
 The machine-wide installation is recommended because the Windows thumbnail
 surrogate may not see a per-user COM registration on every system.
@@ -63,7 +74,7 @@ ie4uinit.exe -show
 ```
 
 The uninstaller removes only registry entries owned by this provider. It does
-not change the application associated with `.def` files.
+not change the application associated with `.def`, `.d32`, or `.p32` files.
 
 ## Test the installation
 
@@ -79,10 +90,12 @@ A successful result looks like:
 Shell thumbnail: 256x171
 ```
 
-To test only the decoder without installing the Shell extension:
+To test either decoder without installing the Shell extension:
 
 ```bat
 DefDump.exe "C:\path\to\file.def" output.bmp
+DefDump.exe "C:\path\to\file.d32" output.bmp
+DefDump.exe "C:\path\to\file.p32" output.bmp
 ```
 
 ## Build from source
@@ -120,11 +133,13 @@ Windows Vista and later use `IThumbnailProvider` with `IInitializeWithStream`.
 Windows XP Explorer uses the older `IExtractImage` interface with
 `IPersistFile`; the provider implements both paths using the same decoder and
 renderer. Registration installs both Shell handler keys without changing the
-normal `.def` file association.
+normal `.def`, `.d32`, or `.p32` file association.
 
 Modern Explorer receives premultiplied ARGB with real transparency. Windows XP
 Explorer does not reliably honor the bitmap alpha channel, so its legacy path
 composites transparent pixels onto the current `COLOR_WINDOW` system color.
+The legacy `IExtractImage` cache key also contains a renderer version, allowing
+pixel-format fixes to invalidate thumbnails produced by older DLL versions.
 
 Use the x86 package on 32-bit Windows XP. Register it from an Administrator
 Command Prompt:
@@ -158,5 +173,5 @@ Provider CLSID:
 ```
 
 The decoder and COM objects do not use mutable global image state. Exceptions
-are caught at COM boundaries so malformed DEF files cannot propagate C++
-exceptions into Windows Explorer.
+are caught at COM boundaries so malformed DEF, D32, or P32 files cannot
+propagate C++ exceptions into Windows Explorer.
