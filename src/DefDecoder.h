@@ -35,5 +35,6 @@ class DefDecoder final
 {
 public:
 	static bool DecodeFirstUseful(const std::vector<uint8_t> & data, DecodeResult & result, std::string & error) noexcept;
+	static bool DecodeAll(const std::vector<uint8_t> & data, std::vector<DecodeResult> & results, std::string & error) noexcept;
 };
 }

@@ -3,11 +3,13 @@
 #include "ComHelpers.h"
 #include "D32Decoder.h"
 #include "DefDecoder.h"
+#include "DefEditorApi.h"
 #include "DllGlobals.h"
 #include "ImageScaler.h"
 #include "P32Decoder.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <new>
 #include <vector>
@@ -341,4 +343,109 @@ ThumbnailProvider::Extract(HBITMAP * bitmap) noexcept
 	{
 		return E_FAIL;
 	}
+}
+
+namespace
+{
+struct EditorDecodeCache
+{
+	const uint8_t * data = nullptr;
+	size_t size = 0;
+	uint64_t signature = 0;
+	bool hasPalette = false;
+	std::array<COLORREF, 256> palette{};
+	std::vector<defthumb::DecodeResult> frames;
+};
+
+uint64_t editorDataSignature(const uint8_t * data, size_t size)
+{
+	uint64_t hash = 1469598103934665603ull;
+	auto consume = [&hash](const uint8_t * begin, size_t length) {
+		for (size_t i = 0; i < length; ++i) { hash ^= begin[i]; hash *= 1099511628211ull; }
+	};
+	const size_t sample = std::min<size_t>(size, 4096);
+	consume(data, sample);
+	if (size > sample) consume(data + size - sample, sample);
+	hash ^= size; hash *= 1099511628211ull;
+	return hash;
+}
+
+const std::vector<defthumb::DecodeResult> * decodeEditorFrames(const uint8_t * data, size_t size, const COLORREF * palette)
+{
+	if (!data || size < 16 + 768)
+		return nullptr;
+	thread_local std::array<EditorDecodeCache, 3> cache;
+	const uint64_t signature = editorDataSignature(data, size);
+	for (auto & item : cache)
+		if (item.data == data && item.size == size && item.signature == signature && item.hasPalette == (palette != nullptr) &&
+			(!palette || std::equal(item.palette.begin(), item.palette.end(), palette)))
+			return &item.frames;
+
+	EditorDecodeCache fresh;
+	fresh.data = data; fresh.size = size; fresh.signature = signature; fresh.hasPalette = palette != nullptr;
+	if (palette) std::copy_n(palette, 256, fresh.palette.begin());
+	std::vector<uint8_t> bytes(data, data + size);
+	if (palette)
+		for (size_t i = 0; i < 256; ++i)
+		{
+			bytes[16 + i * 3] = GetRValue(palette[i]);
+			bytes[17 + i * 3] = GetGValue(palette[i]);
+			bytes[18 + i * 3] = GetBValue(palette[i]);
+		}
+	std::string error;
+	if (!defthumb::DefDecoder::DecodeAll(bytes, fresh.frames, error)) return nullptr;
+	std::rotate(cache.rbegin(), cache.rbegin() + 1, cache.rend());
+	cache.front() = std::move(fresh);
+	return &cache.front().frames;
+}
+}
+
+extern "C" HRESULT __stdcall
+DefEditorGetFrameCount(const uint8_t * data, size_t size, uint32_t * count)
+{
+	if (!count)
+		return E_POINTER;
+	*count = 0;
+	const auto * frames = decodeEditorFrames(data, size, nullptr);
+	if (!frames)
+		return HRESULT_FROM_WIN32(ERROR_BAD_FORMAT);
+	*count = static_cast<uint32_t>(frames->size());
+	return S_OK;
+}
+
+extern "C" HRESULT __stdcall
+DefEditorGetFrameInfo(const uint8_t * data, size_t size, uint32_t ordinal, DefEditorFrameInfo * info)
+{
+	if (!info)
+		return E_POINTER;
+	const auto * frames = decodeEditorFrames(data, size, nullptr);
+	if (!frames || ordinal >= frames->size())
+		return HRESULT_FROM_WIN32(ERROR_BAD_FORMAT);
+	const auto & frame = (*frames)[ordinal].frame;
+	*info = {};
+	info->group = frame.group;
+	info->index = frame.index;
+	info->format = frame.format;
+	info->width = frame.fullWidth;
+	info->height = frame.fullHeight;
+	MultiByteToWideChar(CP_ACP, 0, frame.name.c_str(), -1, info->name, ARRAYSIZE(info->name));
+	return S_OK;
+}
+
+extern "C" HRESULT __stdcall
+DefEditorRenderFrame(const uint8_t * data,
+					 size_t size,
+					 uint32_t ordinal,
+					 const COLORREF * palette,
+					 UINT maximumSize,
+					 HBITMAP * bitmap)
+{
+	if (!bitmap)
+		return E_POINTER;
+	*bitmap = nullptr;
+	const auto * frames = decodeEditorFrames(data, size, palette);
+	if (!frames || ordinal >= frames->size())
+		return HRESULT_FROM_WIN32(ERROR_BAD_FORMAT);
+	*bitmap = defthumb::CreateThumbnailBitmap((*frames)[ordinal].image, maximumSize);
+	return *bitmap ? S_OK : E_OUTOFMEMORY;
 }

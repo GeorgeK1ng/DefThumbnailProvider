@@ -282,10 +282,11 @@ namespace
 		return false;
 	}
 }
-bool DefDecoder::DecodeFirstUseful(const std::vector<uint8_t> & data, DecodeResult & result, std::string & error) noexcept
+bool DefDecoder::DecodeAll(const std::vector<uint8_t> & data, std::vector<DecodeResult> & results, std::string & error) noexcept
 {
 	try
 	{
+		results.clear();
 		if (data.size() < HEADER + PALSIZE)
 			throw std::runtime_error("file too small for DEF header");
 		Reader r(data, 0, data.size());
@@ -332,20 +333,17 @@ bool DefDecoder::DecodeFirstUseful(const std::vector<uint8_t> & data, DecodeResu
 					end = std::min(end, size_t(x.offset));
 			try
 			{
-				auto c = decode(data, pal, e, end);
-				if (useful(c.image))
-				{
-					result = std::move(c);
-					error.clear();
-					return true;
-				}
+				results.push_back(decode(data, pal, e, end));
 			}
 			catch (const std::exception & ex)
 			{
 				last = ex.what();
 			}
 		}
-		throw std::runtime_error(last.empty() ? "no non-empty frame" : "no usable frame: " + last);
+		if (results.empty())
+			throw std::runtime_error(last.empty() ? "no decodable frame" : "no decodable frame: " + last);
+		error.clear();
+		return true;
 	}
 	catch (const std::exception & ex)
 	{
@@ -357,5 +355,21 @@ bool DefDecoder::DecodeFirstUseful(const std::vector<uint8_t> & data, DecodeResu
 		error = "unknown decoder failure";
 		return false;
 	}
+}
+
+bool DefDecoder::DecodeFirstUseful(const std::vector<uint8_t> & data, DecodeResult & result, std::string & error) noexcept
+{
+	std::vector<DecodeResult> results;
+	if (!DecodeAll(data, results, error))
+		return false;
+	for (auto & candidate : results)
+		if (useful(candidate.image))
+		{
+			result = std::move(candidate);
+			error.clear();
+			return true;
+		}
+	error = "no non-empty frame";
+	return false;
 }
 }

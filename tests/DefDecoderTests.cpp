@@ -136,6 +136,12 @@ int main()
 	defthumb::DecodeResult out;
 	std::string err;
 	auto valid = makeUncompressedDef();
+	std::vector<defthumb::DecodeResult> allFrames;
+	if (!defthumb::DefDecoder::DecodeAll(valid, allFrames, err) || allFrames.size() != 1)
+	{
+		std::cerr << "frame enumeration failed: " << err << "\n";
+		return 1;
+	}
 	if (!defthumb::DefDecoder::DecodeFirstUseful(valid, out, err) || out.frame.format != 0 || out.image.width != 2 || out.image.height != 2)
 	{
 		std::cerr << "valid decode failed: " << err << "\n";
